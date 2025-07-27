@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Serial Pixel Visualizer</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background: #1a1a1a;
+        color: white;
+        padding: 20px;
+        margin: 0;
+      }
+
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        text-align: center;
+        color: #4caf50;
+        margin-bottom: 30px;
+      }
+
+      .controls {
+        background: #2d2d2d;
+        padding: 20px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+      }
+
+      .control-group {
+        margin-bottom: 15px;
+      }
+
+      label {
+        display: inline-block;
+        width: 120px;
+        font-weight: bold;
+      }
+
+      select,
+      button {
+        background: #404040;
+        color: white;
+        border: 1px solid #555;
+        padding: 8px 12px;
+        border-radius: 5px;
+        margin-left: 10px;
+      }
+
+      button {
+        background: #4caf50;
+        cursor: pointer;
+        transition: background 0.3s;
+      }
+
+      button:hover {
+        background: #45a049;
+      }
+
+      button:disabled {
+        background: #666;
+        cursor: not-allowed;
+      }
+
+      .status {
+        background: #2d2d2d;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+      }
+
+      .status-indicator {
+        display: inline-block;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        margin-right: 10px;
+      }
+
+      .status-disconnected {
+        background: #f44336;
+      }
+      .status-connected {
+        background: #4caf50;
+      }
+
+      .visualization {
+        text-align: center;
+        background: #2d2d2d;
+        padding: 20px;
+        border-radius: 10px;
+      }
+
+      #pixelCanvas {
+        border: 2px solid #555;
+        image-rendering: pixelated;
+        image-rendering: -moz-crisp-edges;
+        image-rendering: crisp-edges;
+      }
+
+      .stats {
+        display: flex;
+        justify-content: space-around;
+        margin-top: 15px;
+        font-size: 14px;
+      }
+
+      .stat-item {
+        text-align: center;
+      }
+
+      .stat-value {
+        font-size: 18px;
+        font-weight: bold;
+        color: #4caf50;
+      }
+
+      .log {
+        background: #2d2d2d;
+        padding: 15px;
+        border-radius: 10px;
+        margin-top: 20px;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+
+      .log-entry {
+        font-family: monospace;
+        font-size: 12px;
+        padding: 2px 0;
+        border-bottom: 1px solid #404040;
+      }
+
+      .log-entry:last-child {
+        border-bottom: none;
+      }
+
+      .error {
+        color: #f44336;
+      }
+
+      .success {
+        color: #4caf50;
+      }
+
+      .info {
+        color: #2196f3;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Serial Pixel Visualizer (22x22)</h1>
+
+      <div class="controls">
+        <div class="control-group">
+          <label>Baud Rate:</label>
+          <select id="baudRate">
+            <option value="9600">9600</option>
+            <option value="19200">19200</option>
+            <option value="38400">38400</option>
+            <option value="57600">57600</option>
+            <option value="115200" selected>115200</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <button id="connectBtn">Connect to Serial Port</button>
+          <button id="disconnectBtn" disabled>Disconnect</button>
+        </div>
+      </div>
+
+      <div class="status">
+        <span
+          class="status-indicator status-disconnected"
+          id="statusIndicator"
+        ></span>
+        <span id="statusText">Disconnected</span>
+      </div>
+
+      <div class="visualization">
+        <canvas id="pixelCanvas" width="220" height="220"></canvas>
+        <div class="stats">
+          <div class="stat-item">
+            <div class="stat-value" id="frameCount">0</div>
+            <div>Frames</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="pixelCount">0</div>
+            <div>Pixels Received</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" id="avgGrayscale">0</div>
+            <div>Avg Grayscale</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="log" id="logContainer">
+        <div class="log-entry info">Ready to connect to serial port...</div>
+      </div>
+    </div>
+
+    <script>
+      class SerialPixelVisualizer {
+        constructor() {
+          this.port = null;
+          this.reader = null;
+          this.canvas = document.getElementById("pixelCanvas");
+          this.ctx = this.canvas.getContext("2d");
+          this.pixelData = new Array(484).fill(0); // 22x22 = 484 pixels
+          this.currentPixelIndex = 0;
+          this.frameCount = 0;
+          this.totalPixelsReceived = 0;
+          this.isReceivingFrame = false;
+
+          this.initializeCanvas();
+          this.setupEventListeners();
+          this.checkWebSerialSupport();
+        }
+
+        checkWebSerialSupport() {
+          if (!("serial" in navigator)) {
+            this.log("Web Serial API not supported.", "error");
+          }
+        }
+
+        initializeCanvas() {
+          this.ctx.fillStyle = "#000000";
+          this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+
+          // Draw grid lines for better visualization
+          this.ctx.strokeStyle = "#333";
+          this.ctx.lineWidth = 1;
+          for (let i = 0; i <= 22; i++) {
+            const pos = i * 10;
+            this.ctx.beginPath();
+            this.ctx.moveTo(pos, 0);
+            this.ctx.lineTo(pos, 220);
+            this.ctx.stroke();
+
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, pos);
+            this.ctx.lineTo(220, pos);
+            this.ctx.stroke();
+          }
+        }
+
+        setupEventListeners() {
+          document
+            .getElementById("connectBtn")
+            .addEventListener("click", () => this.connect());
+          document
+            .getElementById("disconnectBtn")
+            .addEventListener("click", () => this.disconnect());
+        }
+
+        async connect() {
+          try {
+            const baudRate = parseInt(
+              document.getElementById("baudRate").value
+            );
+
+            this.port = await navigator.serial.requestPort();
+            await this.port.open({ baudRate });
+
+            this.updateStatus(true, `Connected at ${baudRate} baud`);
+            this.log(`Connected to serial port at ${baudRate} baud`, "success");
+
+            document.getElementById("connectBtn").disabled = true;
+            document.getElementById("disconnectBtn").disabled = false;
+
+            this.startReading();
+          } catch (error) {
+            this.log(`Connection failed: ${error.message}`, "error");
+            this.updateStatus(false, "Connection failed");
+          }
+        }
+
+        async disconnect() {
+          try {
+            if (this.reader) {
+              await this.reader.cancel();
+              this.reader.releaseLock();
+            }
+
+            if (this.port) {
+              await this.port.close();
+              this.port = null;
+            }
+
+            this.updateStatus(false, "Disconnected");
+            this.log("Disconnected from serial port", "info");
+
+            document.getElementById("connectBtn").disabled = false;
+            document.getElementById("disconnectBtn").disabled = true;
+          } catch (error) {
+            this.log(`Disconnect error: ${error.message}`, "error");
+          }
+        }
+
+        async startReading() {
+          const textDecoder = new TextDecoderStream();
+          const readableStreamClosed = this.port.readable.pipeTo(
+            textDecoder.writable
+          );
+          this.reader = textDecoder.readable.getReader();
+
+          let buffer = "";
+
+          try {
+            while (true) {
+              const { value, done } = await this.reader.read();
+              if (done) break;
+
+              buffer += value;
+              const lines = buffer.split("\n");
+              buffer = lines.pop(); // Keep incomplete line in buffer
+
+              for (const line of lines) {
+                this.processLine(line.trim());
+              }
+            }
+          } catch (error) {
+            this.log(`Reading error: ${error.message}`, "error");
+          } finally {
+            this.reader.releaseLock();
+          }
+        }
+
+        processLine(line) {
+          if (!line) return;
+
+          if (line === "P: start") {
+            this.startNewFrame();
+          } else if (line.startsWith("P[") && line.includes("]:")) {
+            this.processPixelData(line);
+          }
+        }
+
+        startNewFrame() {
+          this.isReceivingFrame = true;
+          this.currentPixelIndex = 0;
+          this.pixelData.fill(0);
+          this.log("Started new frame", "info");
+        }
+
+        processPixelData(line) {
+          // Parse "P[i]: value" format
+          const match = line.match(/P\[(\d+)\]:\s*(\d+)/);
+          if (!match) return;
+
+          const pixelIndex = parseInt(match[1]);
+          const grayscaleValue = parseInt(match[2]);
+
+          // Validate pixel index
+          if (pixelIndex < 0 || pixelIndex >= 484) {
+            this.log(`Invalid pixel index: ${pixelIndex}`, "error");
+            return;
+          }
+
+          // Clamp grayscale value to 0-255
+          const clampedValue = Math.max(0, Math.min(255, grayscaleValue));
+          this.pixelData[pixelIndex] = clampedValue;
+          this.totalPixelsReceived++;
+
+          // Update pixel count display
+          document.getElementById("pixelCount").textContent =
+            this.totalPixelsReceived;
+          //this.updateVisualization();
+
+          // Check if this is the final pixel (P[483])
+          if (pixelIndex === 483) {
+            this.completeFrame();
+          }
+        }
+
+        completeFrame() {
+          this.frameCount++;
+          this.isReceivingFrame = false;
+
+          this.updateVisualization();
+          this.updateStats();
+
+          this.log(`Frame ${this.frameCount} completed`, "success");
+        }
+
+        updateVisualization() {
+          const imageData = this.ctx.createImageData(22, 22);
+
+          for (let i = 0; i < 484; i++) {
+            const pixelIndex = i * 4;
+            const grayscale = this.pixelData[i];
+
+            imageData.data[pixelIndex] = grayscale; // Red
+            imageData.data[pixelIndex + 1] = grayscale; // Green
+            imageData.data[pixelIndex + 2] = grayscale; // Blue
+            imageData.data[pixelIndex + 3] = 255; // Alpha
+          }
+
+          // Create temporary canvas for scaling
+          const tempCanvas = document.createElement("canvas");
+          tempCanvas.width = 22;
+          tempCanvas.height = 22;
+          const tempCtx = tempCanvas.getContext("2d");
+          tempCtx.putImageData(imageData, 0, 0);
+
+          // Clear main canvas and draw scaled image
+          this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+          this.ctx.imageSmoothingEnabled = false; // Keep pixels crisp
+          this.ctx.drawImage(tempCanvas, 0, 0, 22, 22, 0, 0, 220, 220);
+
+          // Redraw grid
+          this.ctx.strokeStyle = "#333";
+          this.ctx.lineWidth = 1;
+          for (let i = 0; i <= 22; i++) {
+            const pos = i * 10;
+            this.ctx.beginPath();
+            this.ctx.moveTo(pos, 0);
+            this.ctx.lineTo(pos, 220);
+            this.ctx.stroke();
+
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, pos);
+            this.ctx.lineTo(220, pos);
+            this.ctx.stroke();
+          }
+        }
+
+        updateStats() {
+          document.getElementById("frameCount").textContent = this.frameCount;
+
+          const avgGrayscale =
+            this.pixelData.reduce((sum, val) => sum + val, 0) / 484;
+          document.getElementById("avgGrayscale").textContent =
+            Math.round(avgGrayscale);
+        }
+
+        updateStatus(connected, message) {
+          const indicator = document.getElementById("statusIndicator");
+          const text = document.getElementById("statusText");
+
+          indicator.className = `status-indicator ${
+            connected ? "status-connected" : "status-disconnected"
+          }`;
+          text.textContent = message;
+        }
+
+        log(message, type = "info") {
+          const logContainer = document.getElementById("logContainer");
+          const entry = document.createElement("div");
+          entry.className = `log-entry ${type}`;
+          entry.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+
+          logContainer.appendChild(entry);
+          logContainer.scrollTop = logContainer.scrollHeight;
+
+          // Keep only last 100 log entries
+          while (logContainer.children.length > 100) {
+            logContainer.removeChild(logContainer.firstChild);
+          }
+        }
+      }
+
+      // Initialize the visualizer when page loads
+      document.addEventListener("DOMContentLoaded", () => {
+        new SerialPixelVisualizer();
+      });
+    </script>
+  </body>
+</html>
