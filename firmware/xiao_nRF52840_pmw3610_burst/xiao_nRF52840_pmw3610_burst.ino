@@ -1,10 +1,15 @@
 // This code is based on https://github.com/inorichi/zmk-pmw3610-driver
 #include "Adafruit_TinyUSB.h"
 
-#define SCLK D9
-#define SDIO D10
-#define MOTION D8
-#define NCS D7  // Required for burst read!
+//#define SCLK D9
+//#define SDIO D10
+//#define MOTION D8
+//#define NCS D7  // Required for burst read!
+
+#define SCLK 4    // D4
+#define SDIO 5    // D5
+#define NCS  9    // P0.09
+#define MOTION 10 // P0.10
 
 /* Sensor registers (addresses) */
 #define PMW3610_REG_PRODUCT_ID 0x00
