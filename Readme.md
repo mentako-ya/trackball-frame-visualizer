@@ -7,7 +7,7 @@ Print text like below. Visualizer updates screen when it receives `P[484]`. Visu
 You can find example for PMW3610 sensor with XIAO nRF52840 under `firmware`.
 
 ```
-P: start
+P: Start
 P[0]: 0
 P[1]: 10
 ...

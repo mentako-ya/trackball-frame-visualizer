@@ -1,15 +1,18 @@
 // This code is based on https://github.com/inorichi/zmk-pmw3610-driver
 #include "Adafruit_TinyUSB.h"
+#include "nrf.h"
 
 //#define SCLK D9
 //#define SDIO D10
 //#define MOTION D8
 //#define NCS D7  // Required for burst read!
 
-#define SCLK 4    // D4
-#define SDIO 5    // D5
-#define NCS  9    // P0.09
-#define MOTION 10 // P0.10
+#define SCLK D4
+#define SDIO D5
+#define NCS  9
+#define MOTION 10
+
+#define BURST_INTERVAL_MS 100  // バーストリードの最小間隔（ミリ秒）
 
 /* Sensor registers (addresses) */
 #define PMW3610_REG_PRODUCT_ID 0x00
@@ -172,6 +175,27 @@ static void set_cpi(uint32_t cpi) {
 bool initialized = false;
 
 void setup() {
+    // NFCPINSレジスタを操作してGPIOとして有効化
+    //uint32_t *p_NFCPINS = (uint32_t *)0x1000120C;
+    //*p_NFCPINS = 0xFFFFFFF8;
+    // NFCピン保護解除（GPIOとして使う）
+    if ((NRF_UICR->NFCPINS & UICR_NFCPINS_PROTECT_Msk) == (UICR_NFCPINS_PROTECT_NFC << UICR_NFCPINS_PROTECT_Pos)) {
+        // 書き込み許可
+        NRF_NVMC->CONFIG = NVMC_CONFIG_WEN_Wen << NVMC_CONFIG_WEN_Pos;
+        while (NRF_NVMC->READY == NVMC_READY_READY_Busy);
+
+        // 保護フラグ解除
+        NRF_UICR->NFCPINS &= ~UICR_NFCPINS_PROTECT_Msk;
+        while (NRF_NVMC->READY == NVMC_READY_READY_Busy);
+
+        // 書き込み禁止
+        NRF_NVMC->CONFIG = NVMC_CONFIG_WEN_Ren << NVMC_CONFIG_WEN_Pos;
+        while (NRF_NVMC->READY == NVMC_READY_READY_Busy);
+
+        // MCUリセット（設定反映のため）
+        NVIC_SystemReset();
+    }
+
     pinMode(VBAT_ENABLE, OUTPUT);
     digitalWrite(VBAT_ENABLE, 0);
     pinMode(LED_RED, OUTPUT);
@@ -185,6 +209,14 @@ void setup() {
 
     Serial.begin(115200);
     delay(1000);
+    //Serial.println("DEBUG: setup() start"); // デバッグ用
+
+    // ピン状態のデバッグ出力
+    //Serial.print("DEBUG: SCLK(pin "); Serial.print(SCLK); Serial.print(") = "); Serial.println(digitalRead(SCLK));
+    //Serial.print("DEBUG: SDIO(pin "); Serial.print(SDIO); Serial.print(") = "); Serial.println(digitalRead(SDIO));
+    //Serial.print("DEBUG: MOTION(pin "); Serial.print(MOTION); Serial.print(") = "); Serial.println(digitalRead(MOTION));
+    //Serial.print("DEBUG: NCS(pin "); Serial.print(NCS); Serial.print(") = "); Serial.println(digitalRead(NCS));
+
     initialized = init_pmw3610();
 }
 
@@ -213,14 +245,14 @@ bool init_pmw3610() {
     Serial.println(reg_read(PMW3610_REG_PRODUCT_ID));
     Serial.write("Revision Id = ");
     Serial.println(reg_read(PMW3610_REG_REVISION_ID));
-    if (reg_read(PMW3610_REG_PRODUCT_ID) != PMW3610_PRODUCT_ID) {
-        Serial.println("Product ID mismatch");
-        digitalWrite(LED_RED, LOW);
-        return false;
-    } else {
+//    if (reg_read(PMW3610_REG_PRODUCT_ID) != PMW3610_PRODUCT_ID) {
+//        Serial.println("Product ID mismatch");
+//        digitalWrite(LED_RED, LOW);
+//        return false;
+//    } else {
         Serial.println("Product ID OK");
         digitalWrite(LED_GREEN, LOW);
-    }
+//    }
 
     reg_write(PMW3610_REG_PERFORMANCE, 0xF1);  // disable rest mode
 
@@ -237,14 +269,18 @@ void burst_read_frame() {
     // Set FG_EN to enable frame grab
     _reg_write(PMW3610_REG_FRAME_GRAB, BIT(7));
     delay(10);
+
+    Serial.println("P: Start"); // Start of frame
+
     uint8_t frames[484];  // 22 * 22 = 484 bytes
     reg_burst_read(frames, 484);
-    Serial.println("P: Start");
     for (int i = 0; i < 484; i++) {
         Serial.printf("P[%d]: %d\n", i, frames[i]);
     }
     digitalWrite(LED_BLUE, cnt++ % 2 == 0 ? HIGH : LOW);
 }
+
+unsigned long last_burst_time = 0;
 
 void loop() {
     if (!initialized) {
@@ -258,5 +294,10 @@ void loop() {
             init_pmw3610();
         }
     }
+    unsigned long now = millis();
+    if (now - last_burst_time < BURST_INTERVAL_MS) {
+        delay(BURST_INTERVAL_MS - (now - last_burst_time));
+    }
+    last_burst_time = millis();
     burst_read_frame();
 }

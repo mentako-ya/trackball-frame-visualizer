@@ -304,17 +304,21 @@
         }
 
         async startReading() {
+          this.log(`#### startReading ####`, "info");
           const textDecoder = new TextDecoderStream();
           const readableStreamClosed = this.port.readable.pipeTo(
             textDecoder.writable
           );
+          this.log(`befor getReader`, "info");
           this.reader = textDecoder.readable.getReader();
+          this.log(`after getReader`, "info");
 
           let buffer = "";
 
           try {
             while (true) {
               const { value, done } = await this.reader.read();
+
               if (done) break;
 
               buffer += value;
@@ -335,7 +339,8 @@
         processLine(line) {
           if (!line) return;
 
-          if (line === "P: start") {
+          if (line === "P: Start") {
+            this.completeFrame();  
             this.startNewFrame();
           } else if (line.startsWith("P[") && line.includes("]:")) {
             this.processPixelData(line);
@@ -369,13 +374,13 @@
           this.totalPixelsReceived++;
 
           // Update pixel count display
-          document.getElementById("pixelCount").textContent =
-            this.totalPixelsReceived;
+          //document.getElementById("pixelCount").textContent =
+          //this.totalPixelsReceived;
           //this.updateVisualization();
 
           // Check if this is the final pixel (P[483])
           if (pixelIndex === 483) {
-            this.completeFrame();
+            //this.completeFrame();
           }
         }
 
@@ -433,7 +438,8 @@
 
         updateStats() {
           document.getElementById("frameCount").textContent = this.frameCount;
-
+          document.getElementById("pixelCount").textContent =
+            this.currentPixelIndex;
           const avgGrayscale =
             this.pixelData.reduce((sum, val) => sum + val, 0) / 484;
           document.getElementById("avgGrayscale").textContent =
